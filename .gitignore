@@ -1,0 +1,19 @@
+# Build output
+build/
+out/
+*.exe
+*.pdb
+*.ilk
+*.log
+
+# Local test stuff (never commit)
+test_tracks/
+nonstop_fx.log
+imgui.ini
+
+# IDE / OS junk
+.vs/
+.vscode/
+*.user
+Desktop.ini
+Thumbs.db

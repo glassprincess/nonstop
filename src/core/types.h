@@ -6,7 +6,7 @@
 
 namespace nonstop {
 
-// Core frequency bands defined by section 3 of specification
+// which hertz go where
 struct FrequencyBands {
     float subBass = 0.0f; // 20 - 60 Hz
     float bass = 0.0f;    // 60 - 250 Hz
@@ -29,38 +29,38 @@ struct AudioFormatInfo {
     bool isFloat = true;
 };
 
-// Live audio analysis snapshot for UI and visual effects
+// everything the analyzer figured out, packed for the UI and the FX
 struct AudioAnalysisSnapshot {
-    // Overall volume
+    // loudness
     float rms = 0.0f;
     float peak = 0.0f;
     float envelope = 0.0f;
 
-    // Energy bands (raw & smoothed [0.0 - 1.0])
+    // band energy, raw and smoothed
     FrequencyBands bandsRaw;
     FrequencyBands bandsSmoothed;
 
-    // Visualizer logarithmic spectrum bars (e.g. 64 bars)
+    // log bars for the visualizer
     static constexpr size_t NUM_SPECTRUM_BARS = 64;
     float spectrumBars[NUM_SPECTRUM_BARS] = {0.0f};
     float spectrumPeaks[NUM_SPECTRUM_BARS] = {0.0f};
 
-    // Onsets / beat attacks
+    // did something just hit?
     float spectralFlux = 0.0f;
     float fluxThreshold = 0.0f;
     bool isOnset = false;
 
-    // Waveform mini-buffer for oscilloscope (e.g. 256 samples)
+    // a bit of waveform to draw
     static constexpr size_t WAVEFORM_SAMPLES = 256;
     float waveform[WAVEFORM_SAMPLES] = {0.0f};
 
-    // Latency & performance diagnostics
+    // timing trivia
     float captureLatencyMs = 0.0f;
     float dspProcessingMs = 0.0f;
     uint64_t frameCounter = 0;
-    // Monotonic audio clock (seconds of consumed samples). Detector uses
-    // this for onset timestamps: wall-clock lies when frames drain audio
-    // in catch-up bursts (intervals collapse to ~ms and kill repeat math).
+    // audio clock in seconds. The detector stamps hits with this:
+    // wall clock lies when frames gulp audio in bursts (gaps shrink
+    // to ~ms and the repeat math falls apart).
     double audioTimeSec = 0.0;
 };
 

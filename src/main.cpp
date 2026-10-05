@@ -17,8 +17,8 @@
 
 using Microsoft::WRL::ComPtr;
 
-// Shared D3D device for the mini remote (it owns its own swapchain).
-// Device-only: no big diagnostics window anymore (user asked to drop it).
+// one D3D device for the mini window (it brings its own swapchain).
+// device only, no big window attached.
 static ComPtr<ID3D11Device> g_pd3dDevice;
 static ComPtr<ID3D11DeviceContext> g_pd3dDeviceContext;
 
@@ -53,7 +53,7 @@ static void CleanupDeviceD3D() {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     (void)hInstance;
     (void)nCmdShow;
-    // Enable DPI awareness
+    // DPI matters, text goes blurry otherwise
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     const int screenW = GetSystemMetrics(SM_CXSCREEN);
@@ -64,24 +64,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         return 1;
     }
 
-    // 1ms scheduler granularity for the frame pacer below.
+    // 1ms timer ticks for the frame pacer below.
     timeBeginPeriod(1);
     LARGE_INTEGER paceFreq, paceLast;
     QueryPerformanceFrequency(&paceFreq);
     QueryPerformanceCounter(&paceLast);
 
-    // No diagnostics ImGui context here: the mini remote owns the only
-    // UI context (big menu deleted per user request).
+    // no leftover ImGui context here: the mini owns the only UI.
 
-    // Initialize Audio Subsystems
+    // sound in, numbers out
     auto capture = std::make_unique<nonstop::WasapiCapture>();
     auto analyzer = std::make_unique<nonstop::FftAnalyzer>(48000);
     auto phaseDetector = std::make_unique<nonstop::PhaseDetector>();
-    // The mini remote is now the ONLY settings UI (tabbed: FX/Tune/Music/More).
+    // the mini is the whole UI now (FX/Tune/Music/More tabs).
     auto miniWindow = std::make_unique<nonstop::MiniWindow>();
     miniWindow->create(g_pd3dDevice.Get(), g_pd3dDeviceContext.Get());
 
-    // Start capturing default audio endpoint
+    // start with whatever Windows plays to
     if (capture->start(L"")) {
         auto format = capture->getFormatInfo();
         if (format.sampleRate > 0) {
@@ -89,23 +88,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         }
     }
 
-    // Initialize Stage 2 Transparent Click-Through Overlay
+    // the overlay itself: fullscreen, transparent, click-through
     auto overlay = std::make_unique<nonstop::OverlayWindow>();
     overlay->create(screenW, screenH);
 
-    // Initialize Panic Hotkey Manager (Ctrl + Alt + X) in dedicated high-priority thread.
-    // FIX (bind didn't work): the worker thread only RECORDS presses into a
-    // lock-free counter; the actual overlay toggle runs HERE on the main
-    // thread. The old code called overlay->toggleVisible() (ShowWindow /
-    // SetWindowPos on a main-thread window) directly from the hotkey thread,
-    // which was racy and never visibly toggled. Polling also keeps all D3D
-    // and Win32 window calls on one thread.
+    // Panic keys live on their own thread and just count presses.
+    // The toggle itself happens down in the main loop, so no window
+    // call ever fires from the wrong thread (that used to break binds).
     auto hotkeyMgr = std::make_unique<nonstop::HotkeyManager>();
     hotkeyMgr->start();
 
     std::vector<float> audioBatch(4096);
 
-    // Main loop
+    // main loop
     bool done = false;
     while (!done) {
         MSG msg;
@@ -118,7 +113,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         }
         if (done) break;
 
-        // Panic: in HELL MODE always force-hide + disarm (never toggle).
+        // panic: HELL always dies + hides, never toggles.
         while (hotkeyMgr->consumePanicPress()) {
             if (overlay->isHellMode()) {
                 overlay->setVisible(false);
@@ -128,10 +123,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             }
         }
 
-        // Drain audio samples from WASAPI loopback ring buffer and feed into FFT analyzer
+        // suck samples out of WASAPI, push them through the analyzer
         if (capture->isRunning()) {
-            // Keep FFT bin mapping in sync when the user switches output
-            // device mid-session (device combo calls capture->start(id)).
+            // FFT bins depend on the sample rate, so re-tune
+            // when the output device changes mid-session.
             const auto fmt = capture->getFormatInfo();
             if (fmt.sampleRate > 0 && fmt.sampleRate != analyzer->getSampleRate()) {
                 analyzer->setSampleRate(fmt.sampleRate);
@@ -144,24 +139,24 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
         const auto snapshot = analyzer->getSnapshot();
 
-        // Stage 4: track phase follows the analysis snapshot.
+        // what part of the track is this?
         phaseDetector->update(snapshot);
         overlay->setPhaseState(phaseDetector->getState());
         overlay->setReleaseTime(phaseDetector->params().releaseTime);
 
-        // Render transparent overlay frame (audio-reactive effects on top of all windows)
+        // draw the rave on top of everything
         if (overlay->isVisible()) {
             overlay->renderFrame(snapshot);
         }
 
-        // The mini remote is the whole UI now.
+        // mini does its thing here.
         if (miniWindow->isVisible()) {
             miniWindow->render(*overlay, *capture, *analyzer, *phaseDetector, *hotkeyMgr);
         }
 
-        // Frame pacer: presents don't vsync on these windows (~400+fps
-        // observed = pure GPU burn). Cap ~60Hz; audio drain catches up
-        // through the ring buffer, all envelopes use real dt anyway.
+        // presents don't vsync on these windows (saw 400+fps = GPU
+        // melting for nothing). Cap ~60Hz; audio catches up through
+        // the ring buffer, envelopes use real dt anyway.
         LARGE_INTEGER paceNow;
         QueryPerformanceCounter(&paceNow);
         const double frameMs = static_cast<double>(paceNow.QuadPart - paceLast.QuadPart)
@@ -174,16 +169,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         paceLast = paceNow;
     }
 
-    // Stop panic hotkey thread
+    // kill the hotkey thread
     hotkeyMgr->stop();
 
     // Destroy mini remote (own ImGui context).
     miniWindow->shutdown();
 
-    // Destroy overlay
+    // overlay down
     overlay->shutdown();
 
-    // Stop and cleanup audio
+    // sound off
     capture->stop();
 
     CleanupDeviceD3D();

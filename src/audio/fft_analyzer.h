@@ -20,13 +20,13 @@ public:
     void setSampleRate(uint32_t sampleRate);
     uint32_t getSampleRate() const { return m_sampleRate; }
 
-    // Feed new mono samples into analyzer
+    // push mono samples in
     void processSamples(const float* samples, size_t count);
 
-    // Get latest computed snapshot
+    // grab the latest numbers
     AudioAnalysisSnapshot getSnapshot() const;
 
-    // Parameter tuning
+    // knobs
     void setSensitivity(float s) { m_sensitivity = s; }
     float getSensitivity() const { return m_sensitivity; }
 
@@ -45,32 +45,32 @@ private:
 
     PFFFT_Setup* m_pffft = nullptr;
 
-    // Sliding window buffer
+    // incoming samples pile up here
     std::vector<float> m_inputBuffer;
     size_t m_samplesSinceLastFft = 0;
 
-    // Window and work arrays
+    // scratch space for the FFT
     std::vector<float> m_hannWindow;
     std::vector<float> m_windowedInput;
     std::vector<float> m_fftOutput;
     std::vector<float> m_magnitudes;
     std::vector<float> m_prevMagnitudes;
 
-    // Spectral flux history for adaptive threshold
+    // past flux values, for the moving tripwire
     std::vector<float> m_fluxHistory;
     size_t m_fluxHistoryIndex = 0;
 
-    // Refractory period: one transient must not fire several onsets in a
-    // row (FFT hops are ~10ms apart). Counted in performFft() ticks.
+    // one hit shouldn't ring several times (FFT hops are ~10ms
+    // apart). Counted in performFft() ticks.
     int m_onsetCooldown = 0;
 
-    // Monotonic consumed-sample counter -> snapshot.audioTimeSec.
+    // samples eaten so far (audio clock lives here).
     uint64_t m_totalFrames = 0;
 
-    // Result snapshot
+    // latest numbers go here
     AudioAnalysisSnapshot m_snapshot;
 
-    // Log bar frequency bin mappings
+    // which FFT bins belong to which bar
     struct BarRange {
         size_t startBin;
         size_t endBin;

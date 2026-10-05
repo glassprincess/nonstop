@@ -120,7 +120,7 @@ bool WasapiCapture::initializeAudioClient(IMMDevice* pDevice) {
     }
     m_formatInfo.isFloat = isFloat;
 
-    // Request 20ms buffer (200,000 in 100ns units) for ultra low latency loopback
+    // 20ms buffer, loopback. Low latency matters here.
     REFERENCE_TIME hnsRequestedDuration = 200000;
     hr = m_audioClient->Initialize(
         AUDCLNT_SHAREMODE_SHARED,
@@ -252,7 +252,7 @@ size_t WasapiCapture::readSamples(float* outBuffer, size_t count) {
 }
 
 void WasapiCapture::captureLoop() {
-    // Elevate thread priority for pro audio streaming
+    // pro-audio thread priority so the stream doesn't stutter
     DWORD taskIndex = 0;
     HANDLE hAvrt = AvSetMmThreadCharacteristicsW(L"Pro Audio", &taskIndex);
 
@@ -264,13 +264,13 @@ void WasapiCapture::captureLoop() {
         UINT32 packetLength = 0;
         HRESULT hr = m_captureClient->GetNextPacketSize(&packetLength);
         if (FAILED(hr)) {
-            // Audio device may have changed or been disconnected
+            // device unplugged or switched mid-flight
             Sleep(10);
             continue;
         }
 
         if (packetLength == 0) {
-            // No audio currently playing or buffer empty
+            // nothing playing right now, or the buffer's just empty
             Sleep(4);
             continue;
         }
@@ -289,7 +289,7 @@ void WasapiCapture::captureLoop() {
                 }
 
                 if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
-                    // Endpoint produced explicit silence
+                    // the endpoint went quiet on its own
                     std::fill_n(m_monoConversionBuffer.data(), numFramesRead, 0.0f);
                 } else if (pData) {
                     if (isFloat && bits == 32) {
@@ -317,7 +317,7 @@ void WasapiCapture::captureLoop() {
                             m_monoConversionBuffer[f] = sum * invScale;
                         }
                     } else {
-                        // Fallback for unknown bit depth: fill with silence
+                        // weird bit depth: play it safe, write silence
                         std::fill_n(m_monoConversionBuffer.data(), numFramesRead, 0.0f);
                     }
                 }

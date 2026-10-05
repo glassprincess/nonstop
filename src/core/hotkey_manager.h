@@ -17,25 +17,22 @@ public:
     HotkeyManager();
     ~HotkeyManager();
 
-    // Start background hotkey thread listening for Ctrl+Alt+X (and Ctrl+Shift+F12).
-    // Uses a hidden message-only window in the worker thread (reliable delivery),
-    // instead of RegisterHotKey(NULL,...) which depends on thread-queue quirks.
+    // Background thread listening for Ctrl+Alt+X (and Ctrl+Shift+F12).
+    // Hotkeys hang off a hidden window in that thread - plain
+    // RegisterHotKey(NULL,...) misses depending on queue mood.
     bool start();
 
     // Stop listening
     void stop();
 
-    // Legacy callback (invoked on the hotkey worker thread — must be
-    // thread-safe and fast; do NOT touch ImGui/D3D directly).
-    // Preferred path for UI toggles: poll consumePanicPress() on the main
-    // thread each frame (see main.cpp) and execute ShowWindow there.
+    // Old-school callback (worker thread - keep it tiny, no UI calls).
+    // Better: poll consumePanicPress() on the main thread each frame.
     void setPanicCallback(HotkeyCallback callback) {
         std::lock_guard<std::mutex> lock(m_callbackMutex);
         m_panicCallback = std::move(callback);
     }
 
-    // Main-thread polling API (thread-safe, lock-free).
-    // Returns true exactly once per physical hotkey press.
+    // Ask once per press, main thread side.
     bool consumePanicPress();
 
     int getPressCount() const { return m_pressCount.load(std::memory_order_acquire); }
@@ -54,7 +51,7 @@ private:
     mutable std::mutex m_callbackMutex;
     HotkeyCallback m_panicCallback;
 
-    // Lock-free press queue: worker increments, main thread consumes.
+    // press counter: worker bumps it, main thread eats it.
     std::atomic<int> m_pendingPresses{0};
     std::atomic<int> m_pressCount{0};
     std::atomic<ULONGLONG> m_lastPressTickMs{0};

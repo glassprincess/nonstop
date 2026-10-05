@@ -22,7 +22,7 @@ FftAnalyzer::FftAnalyzer(uint32_t sampleRate)
 {
     m_pffft = pffft_new_setup(static_cast<int>(FFT_SIZE), PFFFT_REAL);
 
-    // Precompute Hann window
+    // Hann window, precomputed once
     for (size_t i = 0; i < FFT_SIZE; ++i) {
         m_hannWindow[i] = 0.5f * (1.0f - std::cos(2.0f * PI * static_cast<float>(i) / static_cast<float>(FFT_SIZE - 1)));
     }
@@ -40,7 +40,7 @@ FftAnalyzer::~FftAnalyzer() {
 void FftAnalyzer::setSampleRate(uint32_t sampleRate) {
     m_sampleRate = (sampleRate > 0) ? sampleRate : 48000;
 
-    // Precompute log bar frequency ranges (20 Hz - 20000 Hz)
+    // log-spaced bar ranges (20 Hz - 20000 Hz), figured once
     m_barRanges.resize(AudioAnalysisSnapshot::NUM_SPECTRUM_BARS);
     const float minFreq = 20.0f;
     const float maxFreq = std::min(20000.0f, static_cast<float>(m_sampleRate) * 0.49f);
@@ -66,8 +66,7 @@ void FftAnalyzer::processSamples(const float* samples, size_t count) {
     if (!samples || count == 0) return;
 
     for (size_t i = 0; i < count; ++i) {
-        // Shift input buffer by 1 and append new sample
-        // For performance, we can shift or keep a circular index, but with std::copy it's ultra fast for 2048 floats
+        // push one sample through, FFT every hop
         m_inputBuffer.erase(m_inputBuffer.begin());
         m_inputBuffer.push_back(samples[i]);
         m_samplesSinceLastFft++;
@@ -90,7 +89,7 @@ void FftAnalyzer::performFft() {
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&startPerf);
 
-    // 1. Compute RMS, peak, and waveform snapshot from input buffer
+    // 1. loudness + waveform straight from the buffer
     float sumSq = 0.0f;
     float peak = 0.0f;
     const size_t waveformStep = FFT_SIZE / AudioAnalysisSnapshot::WAVEFORM_SAMPLES;
@@ -105,7 +104,7 @@ void FftAnalyzer::performFft() {
             m_snapshot.waveform[i / waveformStep] = val;
         }
 
-        // Apply Hann window
+        // Hann it
         m_windowedInput[i] = val * m_hannWindow[i];
     }
 
@@ -113,7 +112,7 @@ void FftAnalyzer::performFft() {
     m_snapshot.rms = rms;
     m_snapshot.peak = peak;
 
-    // Smooth envelope tracker (fast attack, smooth release)
+    // envelope that jumps up fast and slides down slow
     const float attack = 0.4f;
     const float release = 0.08f;
     if (peak > m_snapshot.envelope) {
@@ -122,10 +121,10 @@ void FftAnalyzer::performFft() {
         m_snapshot.envelope += release * (peak - m_snapshot.envelope);
     }
 
-    // 2. Perform forward FFT
+    // 2. forward FFT
     pffft_transform_ordered(m_pffft, m_windowedInput.data(), m_fftOutput.data(), nullptr, PFFFT_FORWARD);
 
-    // 3. Compute magnitude spectrum
+    // 3. magnitudes
     const float norm = 2.0f / static_cast<float>(FFT_SIZE);
     m_magnitudes[0] = std::abs(m_fftOutput[0]) / static_cast<float>(FFT_SIZE);
     m_magnitudes[FFT_SIZE / 2] = std::abs(m_fftOutput[1]) / static_cast<float>(FFT_SIZE);
@@ -136,13 +135,13 @@ void FftAnalyzer::performFft() {
         m_magnitudes[k] = std::sqrt(r * r + im * im) * norm * m_sensitivity;
     }
 
-    // 4. Compute 4 frequency bands
+    // 4. the 4 bands
     computeBands(m_magnitudes.data(), FFT_SIZE / 2);
 
-    // 5. Compute logarithmic spectrum bars for UI
+    // 5. log bars for the UI
     computeLogSpectrum(m_magnitudes.data(), FFT_SIZE / 2);
 
-    // 6. Spectral Flux and Onset detection
+    // 6. flux -> did something hit?
     detectOnset(m_magnitudes.data(), FFT_SIZE / 2);
 
     std::copy(m_magnitudes.begin(), m_magnitudes.end(), m_prevMagnitudes.begin());
@@ -155,7 +154,7 @@ void FftAnalyzer::performFft() {
 void FftAnalyzer::computeBands(const float* magnitudes, size_t numBins) {
     const float binWidth = static_cast<float>(m_sampleRate) / static_cast<float>(FFT_SIZE);
 
-    // Section 3 definitions:
+    // bands, plain and simple:
     // Sub-bass: 20 - 60 Hz
     // Bass: 60 - 250 Hz
     // Mids: 250 - 4000 Hz
@@ -179,7 +178,7 @@ void FftAnalyzer::computeBands(const float* magnitudes, size_t numBins) {
     m_snapshot.bandsRaw.mids    = std::clamp(getBandEnergy(250.0f, 4000.0f), 0.0f, 1.0f);
     m_snapshot.bandsRaw.highs   = std::clamp(getBandEnergy(4000.0f, 20000.0f), 0.0f, 1.0f);
 
-    // Smooth bands
+    // smooth them out
     auto smoothVal = [](float current, float target, float attack, float decay) {
         if (target > current) {
             return current + attack * (target - current);
@@ -204,7 +203,7 @@ void FftAnalyzer::computeLogSpectrum(const float* magnitudes, size_t numBins) {
             }
         }
 
-        // Convert to dB scale with floor around -60dB
+        // dB with the floor around -60
         float valNorm = 0.0f;
         if (maxVal > 0.0001f) {
             float db = 20.0f * std::log10(maxVal);
@@ -213,14 +212,14 @@ void FftAnalyzer::computeLogSpectrum(const float* magnitudes, size_t numBins) {
             if (valNorm > 1.0f) valNorm = 1.0f;
         }
 
-        // Fast attack, smooth decay
+        // up fast, down slow
         if (valNorm > m_snapshot.spectrumBars[i]) {
             m_snapshot.spectrumBars[i] = valNorm;
         } else {
             m_snapshot.spectrumBars[i] = m_snapshot.spectrumBars[i] * 0.88f;
         }
 
-        // Peak hold decay
+        // peak markers fall slowly
         if (valNorm > m_snapshot.spectrumPeaks[i]) {
             m_snapshot.spectrumPeaks[i] = valNorm;
         } else {
@@ -230,7 +229,7 @@ void FftAnalyzer::computeLogSpectrum(const float* magnitudes, size_t numBins) {
 }
 
 void FftAnalyzer::detectOnset(const float* magnitudes, size_t numBins) {
-    // Spectral Flux = sum of positive energy differences
+    // flux = energy that wasn't there a moment ago
     float flux = 0.0f;
     for (size_t k = 1; k < numBins; ++k) {
         float diff = magnitudes[k] - m_prevMagnitudes[k];
@@ -241,7 +240,7 @@ void FftAnalyzer::detectOnset(const float* magnitudes, size_t numBins) {
 
     m_snapshot.spectralFlux = flux;
 
-    // Moving average of flux for dynamic thresholding
+    // running average of flux = moving tripwire
     m_fluxHistory[m_fluxHistoryIndex] = flux;
     m_fluxHistoryIndex = (m_fluxHistoryIndex + 1) % m_fluxHistory.size();
 

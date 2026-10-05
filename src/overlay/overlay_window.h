@@ -26,7 +26,7 @@ namespace nonstop {
 
 using Microsoft::WRL::ComPtr;
 
-// Wave-1 effect modules (each independently toggleable in the EFFECTS menu).
+// Effect modules, each toggles on its own.
 enum class FxModule : int {
     RGB = 0,    // chromatic split + echoes (bass)
     SLICE = 1,  // row shifts + glitch blocks (highs/onsets)
@@ -34,7 +34,7 @@ enum class FxModule : int {
     MELT = 3,   // screen melting (release)
     RIPPLE = 4, // onset shockwave rings
     GLASS = 5,  // rain drops + frost + prism (mids/air)
-    ZOOM = 6,   // zoom punch + shake (beats/bass, TZ 4.5)
+    ZOOM = 6,   // zoom punch + shake (beats/bass)
     TEXT = 7,   // ghost words
     JELLY = 8,  // [BETA] elastic whole-screen wobble (onsets)
     STREAK = 9, // [BETA] bright-pixel vertical smear (highs/drop)
@@ -57,7 +57,7 @@ public:
     bool isVisible() const { return m_visible.load(); }
     void toggleVisible();
 
-    // Per-frame phase input (Stage 4). Call before renderFrame().
+    // Phase input, call before renderFrame().
     void setPhaseState(const PhaseState& st) { m_phase = st; }
     const PhaseState& getPhaseState() const { return m_phase; }
     void setReleaseTime(float t) { m_releaseTime = t; }
@@ -68,14 +68,14 @@ public:
     // Destroy window and D3D resources
     void shutdown();
 
-    // Diagnostics & Status
+    // Status info
     bool isExcludedFromCapture() const { return m_excludedFromCapture; }
     HWND getHwnd() const { return m_hwnd; }
     int getWidth() const { return m_width; }
     int getHeight() const { return m_height; }
     std::string getStatusString() const { return m_statusString; }
 
-    // ---- Wave-1 modules (EFFECTS menu). Main thread only. ----
+    // Module switches. Main thread only.
     bool isModuleEnabled(FxModule m) const { return m_modules[static_cast<int>(m)]; }
     void setModuleEnabled(FxModule m, bool on) { m_modules[static_cast<int>(m)] = on; }
 
@@ -99,7 +99,7 @@ public:
     float getPhaseMaster() const { return m_phaseMaster; }
     void setFxPower(float p) { m_fxPower = p; }
     float getFxPower() const { return m_fxPower; }
-    // HELL MODE: 500% overdrive, armed ONLY via the epilepsy warning dialog.
+    // HELL MODE: needs the epilepsy warning first.
     void setHellMode(bool on);
     bool isHellMode() const { return m_hellMode; }
     void setHellIntensity(float v) { m_hellIntensity = std::clamp(v, 1.0f, 5.0f); }
@@ -110,9 +110,8 @@ public:
     float getRepeatHz() const { return m_phase.repeatHz; }
     float getRepeatStrength() const { return m_phase.repeatStrength; }
     bool isRepeatActive() const { return m_phase.repeatActive; }
-    // Streamer mode: hidden=true excludes the overlay from ALL captures
-    // (stream doesn't see the rave); hidden=false (default) makes it
-    // visible to Discord screen share and friends.
+    // Streamer mode: hidden=true keeps the overlay out of every capture,
+    // so the stream stays clean. Default shows it to everyone.
     void setStreamerMode(bool hidden);
     bool isStreamerMode() const { return m_hiddenFromCapture; }
     float getLastDrive() const { return m_lastDrive; }
@@ -123,7 +122,7 @@ public:
         return m_screenVs && m_screenPs && m_screenVb && m_screenParamsCb;
     }
 
-    // ---- Randomization (drop lottery + binding drift). ----
+    // Surprise: accent picks on drops + slow drift of bindings.
     bool isLotteryOn() const { return m_lotteryOn; }
     void setLotteryOn(bool on) { m_lotteryOn = on; }
     bool isDriftOn() const { return m_driftOn; }
@@ -140,7 +139,7 @@ public:
     int getAliveWords() const { return m_aliveWords; }
     uint64_t getTotalWordsSpawned() const { return m_totalSpawned; }
     int getLastPhraseIdx() const { return m_lastPhraseIdx; }
-    void spawnTestWord(); // force-spawn next phrase in order (vetting helper)
+    void spawnTestWord(); // spawn the next phrase, so you can flip through all of them
 
 private:
     bool initD3D();
@@ -172,13 +171,13 @@ private:
     ComPtr<ID3D11RenderTargetView> m_renderTargetView;
     ComPtr<ID3D11BlendState> m_blendState;
 
-    // Primitives rendering (legacy color quads; kept for text-free fallback)
+    // Old color-quad pipeline (not drawn anymore, still inits).
     ComPtr<ID3D11VertexShader> m_vs;
     ComPtr<ID3D11PixelShader> m_ps;
     ComPtr<ID3D11Buffer> m_vertexBuffer;
     ComPtr<ID3D11InputLayout> m_inputLayout;
 
-    // Screen-space FX chain (wave-1 uber-shader)
+    // Screen-space FX chain (one uber-shader does it all)
     ComPtr<ID3D11VertexShader> m_screenVs;
     ComPtr<ID3D11PixelShader> m_screenPs;
     ComPtr<ID3D11Buffer> m_screenVb;
@@ -189,7 +188,7 @@ private:
     ComPtr<ID3D11Buffer> m_dupCb; // FxDup b2: duplication cascade (repeats)
     ScreenCapturer m_capturer;
 
-    // Ghost-words text atlas (baked at init) + dynamic quad buffer + shader
+    // Ghost-words text atlas (baked at init) + quads + shader
     ComPtr<ID3D11Texture2D> m_textAtlas;
     ComPtr<ID3D11ShaderResourceView> m_textSrv;
     ComPtr<ID3D11PixelShader> m_textPs;
@@ -226,8 +225,8 @@ private:
     TrackPhase m_prevPhase = TrackPhase::CALM;
     float m_phaseMaster = 0.0f;
     float m_meltSmooth = 0.0f;
-    float m_testHold = 0.0f; // Test Flash forces full-strength demo, decays
-    // Last-frame FX diagnostics (EFFECTS menu + log file)
+    float m_testHold = 0.0f; // test flash holds full strength while it decays
+    // Last-frame numbers (mini panel + log file)
     float m_lastDrive = 0.0f;
     float m_lastIntensity = 0.0f;
     float m_lastJelly = 0.0f;
@@ -245,25 +244,25 @@ private:
     float m_songGain = 0.0f;
     double m_timeSec = 0.0;
     float m_driftAmp = 0.0016f;
-    float m_ghostMix = 0.45f;      // less rainbow: echoes tamed
-    float m_satBoost = 0.15f;      // less rainbow: vibrance tamed
-    float m_fxPower = 1.8f; // global FX strength multiplier (user: stronger)
+    float m_ghostMix = 0.45f;
+    float m_satBoost = 0.15f;
+    float m_fxPower = 1.8f; // one knob to rule them all
     bool m_hiddenFromCapture = false; // streamer mode: hide FX from captures
     float m_rippleT = 10.0f;
     float m_rippleCx = 0.5f;
     float m_rippleCy = 0.5f;
     float m_blockSeed = 0.0f;
-    // Drum-fill blast: brief full-screen distortion kick + word staircase.
+    // Drum-fill blast: short full-screen kick + word staircase.
     float m_blast = 0.0f;          // 1.0 on blast, fast decay
     double m_lastBlastSec = -1e9;  // cooldown
     std::deque<double> m_onsetTimes; // 350ms window for fill detection
-    // Jelly spring: kicked by onsets, ~6Hz decaying wobble.
+    // Jelly: kicked by onsets, wobbles itself calm in ~6Hz.
     float m_jellyX = 0.0f;
     float m_jellyV = 0.0f;
     // Duplication cascade state (repeats): copies multiply and drift.
     float m_dupN = 0.0f;    // smoothed active copy count 0..3
     float m_dupGrow = 0.0f; // grows while repeat holds (copies leave)
-    // Real frame time (presents don't vsync; never assume 1/60).
+    // Real frame time (presents don't vsync, 1/60 means nothing here).
     LARGE_INTEGER m_lastFrameQpc = {};
     bool m_qpcInit = false;
     float m_frameDt = 1.0f / 60.0f;
@@ -277,10 +276,10 @@ private:
     double m_lastInvFlipSec = -1e9;
     float m_hellInv = 0.0f; // smoothed invert amount (no stuck negative)
     float m_mirrorT = 10.0f;
-    float m_releaseTime = 2.5f; // synced from detector params (RELEASE curve)
+    float m_releaseTime = 2.5f; // how long RELEASE fades out
     uint64_t m_capturedFrames = 0;
 
-    // Randomization: drop-lottery accents + binding drift weights
+    // Surprise accents + drift weights
     bool m_lotteryOn = true;
     bool m_driftOn = true;
     uint32_t m_seed = 1337;

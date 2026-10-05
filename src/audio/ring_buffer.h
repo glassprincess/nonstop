@@ -7,7 +7,7 @@
 
 namespace nonstop {
 
-// Lock-free Single-Producer Single-Consumer (SPSC) ring buffer
+// one writer, one reader, no locks
 template <typename T>
 class RingBuffer {
 public:
@@ -40,7 +40,7 @@ public:
             availableSpace = currentRead - currentWrite;
         }
 
-        // Leave 1 element free to disambiguate full vs empty
+        // one slot stays empty so full and empty look different
         if (availableSpace <= 1) return 0;
         const size_t toWrite = std::min(count, availableSpace - 1);
 

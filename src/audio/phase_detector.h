@@ -27,8 +27,8 @@ inline const char* toString(TrackPhase p) {
     return "?";
 }
 
-// All thresholds are explicitly "tune on test tracks" (TZ 0.2-0.3:
-// no invented constants treated as truth). Defaults are starting points.
+// Knobs below are starting points - tune them on real tracks,
+// don't treat any number here as gospel.
 struct PhaseParams {
     float buildSlopeWindow = 3.0f;   // seconds of bass history for slope
     float buildSlopeThresh = 0.030f; // bass energy rise per second -> BUILD
@@ -42,10 +42,10 @@ struct PhaseParams {
     float maxDropTime = 20.0f;       // DROP -> RELEASE fallback
     float releaseRatio = 0.55f;      // bass < dropPeak*ratio -> RELEASE
     float calmFloor = 0.12f;         // bass below -> CALM candidate
-    float releaseTime = 2.5f;        // overlay RELEASE decay duration (acceptance #4)
+    float releaseTime = 2.5f;        // how long the cooldown fade lasts
     float minDwell = 0.8f;           // min seconds in any phase (anti-chatter)
     float maxReleaseTime = 14.0f;    // RELEASE -> CALM fallback
-    // Repeat detector (HELL MODE invert sync): periodic onset bursts.
+    // Repeat detector (for the HELL invert): bursts of periodic hits.
     float repMinHz = 3.0f;           // repeat rate band low
     float repMaxHz = 18.0f;          // repeat rate band high
     float repOnThresh = 0.50f;       // regularity to arm repeat
@@ -60,7 +60,7 @@ struct PhaseState {
     float timeInPhase = 0.0f;   // seconds
     float onsetDensity = 0.0f;  // onsets/sec (diagnostics)
     float bassSlope = 0.0f;     // per-second bass rise (diagnostics)
-    // Repeat tracker (HELL MODE): fast periodic hits (rolls, repeat-kicks).
+    // Repeat tracker: fast periodic hits (rolls, repeat-kicks).
     bool repeatActive = false;
     float repeatHz = 0.0f;      // estimated hits/sec while active
     float repeatStrength = 0.0f;// 0..1 regularity while active
@@ -68,8 +68,8 @@ struct PhaseState {
     float repeatCandStr = 0.0f; // last candidate strength (debug, always live)
 };
 
-// Stage 4: CALM / BUILD / DROP / RELEASE detector (TZ 3.5, 12.4).
-// Single-threaded: update() on the main/render thread once per frame.
+// Figures out where in the track we are: calm / buildup / drop / cooldown.
+// Call update() once per frame, same thread.
 class PhaseDetector {
 public:
     PhaseDetector();
@@ -81,7 +81,7 @@ public:
     PhaseParams& params() { return m_params; }
     const PhaseParams& params() const { return m_params; }
 
-    // Last transitions, newest last (for diagnostics log).
+    // Last switches, newest last (shown in the log box).
     std::vector<std::string> getLog() const { return m_log; }
 
 private:

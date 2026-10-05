@@ -167,8 +167,8 @@ ID3D11ShaderResourceView* ScreenCapturer::acquireFrame(ID3D11DeviceContext* cont
         return m_captureSrv.Get(); // reuse last good frame (freshness checked by caller)
     }
     if (hr == DXGI_ERROR_ACCESS_LOST) {
-        // Mode change / secure desktop (UAC): duplication is dead, the kept
-        // frame is immediately STALE — caller must not composite it.
+        // screen mode changed (or that admin prompt screen): the grabber
+        // is dead, and whatever frame we kept is stale on the spot.
         m_errors++;
         m_lastFreshSec = -1e9; // invalidate
         m_duplication.Reset();
@@ -185,8 +185,8 @@ ID3D11ShaderResourceView* ScreenCapturer::acquireFrame(ID3D11DeviceContext* cont
     }
 
     // Freshness: only frames with new pixels reset the clock. Empty polls
-    // (AccumulatedFrames==0, same present id) keep the old timestamp so a
-    // frozen secure desktop ages out instead of sticking forever.
+    // keep the old timestamp, so a frozen screen ages out instead of
+    // sticking around forever.
     const long long present = frameInfo.LastPresentTime.QuadPart;
     const bool hasNewPixels = (frameInfo.AccumulatedFrames > 0)
         || (present != 0 && present != m_prevPresent);

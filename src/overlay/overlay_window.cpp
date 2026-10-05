@@ -29,7 +29,7 @@ const char* fxModuleName(FxModule m) {
     }
 }
 
-// Ghost-words phrases: short mysterious English lines (user asked ~3 words).
+// whisper lines for the ghost words. short and cryptic, english only.
 static const wchar_t* kGhostPhrases[] = {
     L"i am here", L"watch me", L"lost in static", L"stay with me",
     L"do not blink", L"it sees you", L"hear the signal", L"behind your eyes",
@@ -49,7 +49,7 @@ struct ScreenVertex {
 };
 
 struct ScreenParams {
-    // Wave-1 uber-shader constants (6 x float4 = 96 bytes, row-major mirror).
+    // one uber-shader, 6 float4s of knobs.
     float rgbOx, rgbOy, alpha, time;
     float ghostMix, satBoost, driftAmp, streakAmt;
     float sliceAmp, blockAmp, blockSeed, waveAmp;
@@ -65,7 +65,7 @@ struct TextParams {
     float pad;
 };
 
-// HELL MODE extras, separate cbuffer (b1) so the wave-1 layout never moves.
+// HELL extras live in their own cbuffer (b1).
 struct FxHellParams {
     float invertAmt;  // repeat-synced negative flip (HELL only)
     float mirrorAmt;  // brief asymmetric mirror band on DROP (HELL only)
@@ -73,9 +73,8 @@ struct FxHellParams {
     float hpad;
 };
 
-// Duplication cascade (repeats), separate cbuffer (b2): whole-screen
-// copies drifting apart with tinted trails. NOT the RGB channel split:
-// these are full copies of the snapshot, shifted by tens of pixels.
+// Duplication cascade (b2): whole copies of the shot drifting apart.
+// Not the RGB split - full frames shifted by tens of pixels.
 struct FxDupParams {
     float dupN;                 // smoothed active copy count 0..3
     float dupAa, dupAb, dupAc;  // per-copy weights
@@ -89,10 +88,10 @@ struct FxDupParams {
 static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_NCHITTEST:
-        // Pass ALL mouse clicks and movement directly to the game/windows beneath
+        // let every click fall through to the game
         return HTTRANSPARENT;
     case WM_MOUSEACTIVATE:
-        // Never steal focus or activate overlay on clicks
+        // never steal focus
         return MA_NOACTIVATE;
     case WM_ERASEBKGND:
         return 1;
@@ -126,7 +125,7 @@ bool OverlayWindow::create(int width, int height) {
     wc.lpszClassName = className;
     RegisterClassExW(&wc);
 
-    // Extended window styles: Topmost, transparent click-through, layered, no-activate, tool window
+    // topmost, transparent, click-through, no taskbar button blinking
     DWORD exStyle = WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
     DWORD style = WS_POPUP | WS_VISIBLE;
 
@@ -147,17 +146,16 @@ bool OverlayWindow::create(int width, int height) {
         return false;
     }
 
-    // Required for WS_EX_LAYERED windows to be rendered by DWM
+    // layered windows need this for DWM to draw them
     SetLayeredWindowAttributes(m_hwnd, RGB(0, 0, 0), 255, LWA_ALPHA);
 
-    // Extend DWM frame into entire client area for true hardware alpha composition
+    // glass over the whole window so alpha blending is real
     MARGINS margins = { -1, -1, -1, -1 };
     DwmExtendFrameIntoClientArea(m_hwnd, &margins);
 
-    // Capture affinity: streamer mode hides the overlay from ALL captures
-    // (friends don't see the rave); default shows it to everyone.
-    // NOTE: visible mode feeds our own duplication too (video feedback) —
-    // composite alpha is damped in renderFxChain to keep it bounded.
+    // streamer mode keeps us out of every capture.
+    // heads up: when everyone can see us, our own capture sees us too
+    // (feedback loop) - alpha is damped to keep it calm.
     applyCaptureAffinity();
 
     if (!initD3D()) {
@@ -168,13 +166,13 @@ bool OverlayWindow::create(int width, int height) {
     ShowWindow(m_hwnd, SW_SHOWNOACTIVATE);
     UpdateWindow(m_hwnd);
 
-    // Keep window strictly TOPMOST
+    // stay on top of the game
     SetWindowPos(m_hwnd, HWND_TOPMOST, 0, 0, m_width, m_height, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
 
     m_visible.store(true);
     m_rng.seed(m_seed); // deterministic default; EFFECTS menu can reroll
-    // NOTE: append, never overwrite — initD3D records pipeline/shader
-    // failures here and wiping them made a dead FX chain undiagnosable.
+    // don't wipe this: shader errors land here, and without them
+    // a dead FX chain looks perfectly fine while showing nothing.
     m_statusString += " | Active (D3D11 HWND: " + std::to_string(reinterpret_cast<uintptr_t>(m_hwnd)) + ", WDA OK: " + (m_excludedFromCapture ? "YES" : "NO") + ")";
     return true;
 }
@@ -242,7 +240,7 @@ bool OverlayWindow::initD3D() {
         return false;
     }
 
-    // Alpha blend state for transparent overlay composition
+    // normal alpha blending
     D3D11_BLEND_DESC blendDesc = {};
     blendDesc.RenderTarget[0].BlendEnable = TRUE;
     blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
@@ -259,7 +257,7 @@ bool OverlayWindow::initD3D() {
         return false;
     }
 
-    // Embedded 2D colored quad vertex & pixel shaders
+    // plain colored-quad shaders
     const char* shaderSource = R"(
         struct VS_INPUT {
             float2 pos : POSITION;
@@ -306,7 +304,7 @@ bool OverlayWindow::initD3D() {
     hr = m_d3dDevice->CreateInputLayout(layoutDesc, ARRAYSIZE(layoutDesc), vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), m_inputLayout.GetAddressOf());
     if (FAILED(hr)) return false;
 
-    // Dynamic vertex buffer for 2D primitives
+    // scratch vertex buffer
     D3D11_BUFFER_DESC vbDesc = {};
     vbDesc.ByteWidth = sizeof(OverlayVertex) * 16384;
     vbDesc.Usage = D3D11_USAGE_DYNAMIC;
@@ -315,13 +313,13 @@ bool OverlayWindow::initD3D() {
     hr = m_d3dDevice->CreateBuffer(&vbDesc, nullptr, m_vertexBuffer.GetAddressOf());
     if (FAILED(hr)) return false;
 
-    // Stage 3: screen-capture + RGB-split pipeline.
+    // screen FX pipeline.
     if (!initScreenPipeline()) {
         m_statusString += " [screen pipeline FAILED]";
     }
 
-    // Stage 3: bind desktop duplication to the same device. Non-fatal:
-    // without capture the RGB pass is skipped.
+    // hook desktop duplication to the same device. No capture -
+    // no picture pass, overlay just stays clear.
     if (m_capturer.init(m_d3dDevice.Get())) {
         m_statusString += std::string(" [capture: ") + m_capturer.getStatusString() + "]";
     } else {
@@ -462,8 +460,8 @@ bool OverlayWindow::initScreenPipeline() {
             float g = lerp(g0, g1, ghostMix * 0.35);
             float b = lerp(b0, b1, ghostMix * 0.5);
             float3 col = float3(r, g, b) + rim * 0.10;
-            // 9b. duplication cascade: whole snapshot copies drift apart
-            // with tinted trails (this is the REPEAT effect, not RGB-split).
+            // 9b. duplication cascade: whole copies drift apart
+            // with tinted trails (the REPEAT effect, copies not channels).
             float3 dup = float3(0.0, 0.0, 0.0);
             dup += screenTex.Sample(screenSamp, input.uv + float2(dupAx, dupAy)).rgb
                  * float3(1.0, 0.35, 0.35) * dupAa;
@@ -556,7 +554,7 @@ bool OverlayWindow::initScreenPipeline() {
                                         m_screenLayout.GetAddressOf());
     if (FAILED(hr)) return false;
 
-    // Fullscreen quad (NDC) with top-left-origin UVs matching duplication texture.
+    // fullscreen quad, UVs match the captured frame.
     const ScreenVertex quad[6] = {
         { -1.0f,  1.0f, 0.0f, 0.0f },
         {  1.0f,  1.0f, 1.0f, 0.0f },
@@ -593,7 +591,7 @@ bool OverlayWindow::initScreenPipeline() {
     hr = m_d3dDevice->CreateBuffer(&cbDesc, nullptr, m_screenParamsCb.GetAddressOf());
     if (FAILED(hr)) return false;
 
-    // HELL MODE extras (b1): zero-initialized, filled per frame when armed.
+    // HELL extras (b1): starts zeroed, filled every frame.
     D3D11_BUFFER_DESC hellDesc = {};
     hellDesc.ByteWidth = sizeof(FxHellParams);
     hellDesc.Usage = D3D11_USAGE_DYNAMIC;
@@ -605,7 +603,7 @@ bool OverlayWindow::initScreenPipeline() {
         return false;
     }
 
-    // Duplication cascade (b2): zero-initialized, filled per frame.
+    // dup uniforms (b2): starts zeroed, filled every frame.
     D3D11_BUFFER_DESC dupDesc = {};
     dupDesc.ByteWidth = sizeof(FxDupParams);
     dupDesc.Usage = D3D11_USAGE_DYNAMIC;
@@ -617,7 +615,7 @@ bool OverlayWindow::initScreenPipeline() {
         return false;
     }
 
-    // Ghost-words text shader (reuses the pos+uv vertex layout).
+    // text shader, same vertex layout.
     ComPtr<ID3DBlob> textBlob;
     hr = D3DCompile(textPsSrc, strlen(textPsSrc), nullptr, nullptr, nullptr,
                     "ps_text", "ps_4_0", 0, 0, &textBlob, &errBlob);
@@ -629,7 +627,7 @@ bool OverlayWindow::initScreenPipeline() {
                                         nullptr, m_textPs.GetAddressOf());
     if (FAILED(hr)) return false;
 
-    // Dynamic VB for up to kMaxWords strip quads (ScreenVertex each).
+    // scratch buffer for word quads.
     D3D11_BUFFER_DESC textVbDesc = {};
     textVbDesc.ByteWidth = sizeof(ScreenVertex) * 6 * kMaxWords;
     textVbDesc.Usage = D3D11_USAGE_DYNAMIC;
@@ -646,7 +644,7 @@ bool OverlayWindow::initScreenPipeline() {
     hr = m_d3dDevice->CreateBuffer(&textCbDesc, nullptr, m_textCb.GetAddressOf());
     if (FAILED(hr)) return false;
 
-    // Phrase atlas bake is non-fatal: TEXT module auto-disables without it.
+    // if the atlas fails, words just stay off.
     if (!bakeTextAtlas()) {
         m_modules[static_cast<int>(FxModule::TEXT)] = false;
         m_statusString += " [text atlas FAILED]";
@@ -680,7 +678,7 @@ void OverlayWindow::setHellMode(bool on) {
         m_lastInvFlipSec = -1e9;
         m_mirrorT = 10.0f;
     } else {
-        // Invert decays via smoothing below; polarity reset avoids stuck negative.
+        // smoothing pulls invert back, never gets stuck on.
         m_invPolarity = 0;
     }
 }
@@ -712,7 +710,7 @@ void OverlayWindow::toggleVisible() {
 void OverlayWindow::renderFrame(const AudioAnalysisSnapshot& snapshot) {
     if (!m_hwnd || !m_visible.load() || !m_d3dContext || !m_swapChain) return;
 
-    // Ensure overlay stays top-most over games
+    // stay on top of the game
     m_renderedFrames++;
     if (m_renderedFrames % 120 == 0) {
         SetWindowPos(m_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -731,15 +729,14 @@ void OverlayWindow::renderFrame(const AudioAnalysisSnapshot& snapshot) {
     m_d3dContext->OMSetRenderTargets(1, m_renderTargetView.GetAddressOf(), nullptr);
     m_d3dContext->ClearRenderTargetView(m_renderTargetView.Get(), clearColor);
 
-    // Wave-1 FX chain: distorted copy of the real screen (per-module amps
-    // from band/beat/phase) + ghost words on top. No procedural quads.
+    // bent copy of the real screen (amps from band/beat/phase)
+    // + ghost words on top. No drawn shapes, just the screen itself.
     renderFxChain(snapshot);
 
-    // Present without VSync wait or with VSync
+    // show it.
     m_swapChain->Present(1, 0);
 
-    // Frame log (local diagnostics only, no network): proves the FX pass
-    // actually draws and shows why it skips. One line ~2s.
+    // frame log for debugging: did we draw, and if not, why. A line every ~2s.
     if (m_renderedFrames % 120 == 1) {
         std::ofstream log("nonstop_fx.log", std::ios::app);
         if (log) {
@@ -804,14 +801,14 @@ float OverlayWindow::accentBoost(FxModule m) const {
 }
 
 void OverlayWindow::updateRandom(const AudioAnalysisSnapshot& /*snapshot*/) {
-    // Slow random walk of band->module weights (binding drift).
+    // weights slowly wander on their own.
     if (m_driftOn) {
         std::uniform_real_distribution<float> nudge(-0.24f, 0.24f);
         for (auto& w : m_driftW) {
             w = std::clamp(w + nudge(m_rng) * m_frameDt, 0.6f, 1.4f);
         }
     }
-    // Drop lottery: 1-2 accent modules get x1.9 for ~6s.
+    // on a drop, 1-2 modules get loud for ~6s.
     if (m_lotteryOn && m_phase.phase == TrackPhase::DROP
         && m_prevPhase != TrackPhase::DROP) {        static const FxModule kPool[] = {
             FxModule::SLICE, FxModule::WARP, FxModule::RIPPLE,
@@ -832,7 +829,7 @@ void OverlayWindow::updateRandom(const AudioAnalysisSnapshot& /*snapshot*/) {
         }
         m_accentString = names + " x1.9";
     }
-    // Expire accents.
+    // accents wear off.
     bool anyActive = false;
     for (const auto& a : m_accents) {
         if (a.boost > 1.0f && m_timeSec < a.until) {
@@ -847,8 +844,7 @@ void OverlayWindow::updateRandom(const AudioAnalysisSnapshot& /*snapshot*/) {
 }
 
 void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
-    // Wall-clock frame time: presents don't vsync here (~400+fps observed),
-    // so every envelope uses real dt, never "1/60 per frame".
+    // real frame time - presents don't vsync, so no 1/60 assumptions.
     LARGE_INTEGER qfreq, qnow;
     QueryPerformanceFrequency(&qfreq);
     QueryPerformanceCounter(&qnow);
@@ -864,13 +860,13 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
     m_frameDt = fdt;
     m_timeSec += dt;
 
-    // Beat envelope: 1.0 on onset, rate-based decay (3.6/s at default).
+    // beat punch: 1 on a hit, then fades.
     if (snapshot.isOnset) {
         m_rgbFlash = 1.0f;
     } else {
         m_rgbFlash = std::max(0.0f, m_rgbFlash - m_rgbDecay * 60.0f * fdt);
     }
-    // Test Flash forces a full-strength demo even in silence/CALM.
+    // test button pins everything to full for a bit.
     m_testHold = std::max(0.0f, m_testHold - 1.2f * fdt);
 
     // --- Song-level follower: instant loudness vs slow ceiling. ---
@@ -886,9 +882,8 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
     m_songLevel = level;
     m_songGain = std::clamp(level / m_loudPeak, 0.0f, 1.0f);
 
-    // --- Phase master (Stage 4) as MODULATOR, not a gate: the base layer
-    // (beats/bands/song) always drives the FX; phase scales the ceiling.
-    // CALM keeps a floor so the rave never dies into glass.
+    // phase just scales the ceiling. CALM keeps a floor
+    // so it never fully dies.
     switch (m_phase.phase) {
     case TrackPhase::CALM:
         m_phaseMaster = 0.55f;
@@ -906,7 +901,7 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
         break;
     }
 
-    // HELL MODE: session auto-off + lifted ceiling (transparency be damned).
+    // HELL MODE: session auto-off + no transparency limits.
     if (m_hellMode) {
         if (m_hellAutoOffMin > 0.0f
             && (m_timeSec - m_hellSinceSec) > m_hellAutoOffMin * 60.0) {
@@ -918,8 +913,8 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
 
     updateRandom(snapshot);
 
-    // Onset extras: ripple shockwave from a random point, fresh block seed,
-    // jelly spring kick, drum-fill detection for the word staircase blast.
+    // on a hit: ripple somewhere random, fresh glitch seed,
+    // jelly kick, maybe a word blast.
     if (snapshot.isOnset) {
         std::uniform_real_distribution<float> u01(0.15f, 0.85f);
         if (isModuleEnabled(FxModule::RIPPLE)) {
@@ -928,8 +923,7 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
         std::uniform_real_distribution<float> useed(0.0f, 100.0f);
         m_blockSeed = useed(m_rng);
         if (isModuleEnabled(FxModule::JELLY)) {
-            // Kick hard: x_max ~= v/omega (omega ~= 37.7) -> v=30 gives ~0.8.
-            // Old kick of 1.0 peaked at 0.026 = invisible (the [BETA] bug).
+            // hard kick so you actually see it wobble.
             m_jellyV += 30.0f;
         }
         m_onsetTimes.push_back(m_timeSec);
@@ -937,7 +931,8 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
     while (!m_onsetTimes.empty() && m_timeSec - m_onsetTimes.front() > 0.35) {
         m_onsetTimes.pop_front();
     }
-    // Drum fill = 4+ onsets in 350ms. 35% chance, 5s cooldown.
+    // a drum fill is 4+ hits in 350ms. Sometimes (35%) it fires
+    // the staircase, 5s cooldown either way.
     if (m_onsetTimes.size() >= 4 && m_timeSec - m_lastBlastSec > 5.0) {
         std::uniform_real_distribution<float> u01(0.0f, 1.0f);
         if (u01(m_rng) < 0.35f) {
@@ -980,8 +975,7 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
     if (!m_screenVs || !m_screenPs || !m_screenVb || !m_screenParamsCb) return;
     if (m_width <= 0 || m_height <= 0) return;
 
-    // Unbind stale SRV before CopyResource inside acquireFrame
-    // (can't CopyResource into a texture still bound as shader input).
+    // must unbind first or the copy fails.
     ID3D11ShaderResourceView* nullSrv[1] = { nullptr };
     m_d3dContext->PSSetShaderResources(0, 1, nullSrv);
 
@@ -1007,8 +1001,7 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
     const float highsE = snapshot.bandsSmoothed.highs;
     const float beat = m_rgbFlash + bassE * 0.40f;
 
-    // Combined drive: phase master x track-relative gain, onsets whisper in CALM.
-    // Test Flash overrides everything for the demo.
+    // total push. Test button overrides everything.
     float drive = std::clamp(
         m_phaseMaster * (0.35f + 0.65f * m_songGain)
             + m_rgbFlash * 0.30f * std::max(m_phaseMaster, 0.15f),
@@ -1026,7 +1019,7 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
     const auto amt = [&](FxModule m) { return m_amounts[static_cast<int>(m)]; };
     const auto acc = [&](FxModule m) { return accentBoost(m); };
 
-    // Melt follows RELEASE curve (plus a whisper in DROP tail).
+    // melt runs on the RELEASE fade.
     float meltTarget = 0.0f;
     if (on(FxModule::MELT) && m_phase.phase == TrackPhase::RELEASE) {
         meltTarget = amt(FxModule::MELT) * dw(FxModule::MELT) * acc(FxModule::MELT)
@@ -1037,16 +1030,13 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
     ScreenParams params = {};
     const float rgbOn = (on(FxModule::RGB) ? 1.0f : 0.0f)
         * amt(FxModule::RGB) * dw(FxModule::RGB) * acc(FxModule::RGB);
-    // Global FX power: user asked everything (except words) hits harder.
-    // HELL MODE multiplies up to x5 on top (100-500% overdrive).
+    // one power knob for everything but words. HELL multiplies up to x5.
     const float P = m_fxPower * (m_hellMode ? m_hellIntensity : 1.0f);
     const float offsetPx = m_rgbStrengthPx * beat * (0.35f + 0.65f * drive) * rgbOn * P;
     params.rgbOx = offsetPx / static_cast<float>(m_width);
     params.rgbOy = (offsetPx * 0.25f) / static_cast<float>(m_height);
-    // Feedback damping: when the overlay is visible to captures (streamer
-    // mode OFF), our own duplication sees our output — cap composite alpha
-    // so the video-feedback loop stays bounded instead of blowing to white.
-    // HELL MODE lifts the cap to fully opaque: total destruction allowed.
+    // visible-to-everyone mode feeds our own capture too, so alpha
+    // is capped to keep the loop calm. HELL allows full opaque.
     params.alpha = std::clamp(intensity, 0.0f, 1.0f)
         * (m_hellMode ? 1.0f : 0.95f)
         * (m_hiddenFromCapture ? 1.0f : 0.8f);
@@ -1113,10 +1103,10 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
         * std::max(drive, 0.20f) * P;
     params.rippleCx = m_rippleCx;
     params.rippleCy = m_rippleCy;
-    // blast + jellyAmt assigned in the [BETA] routing below.
+    // blast and jelly weights below.
 
-    // Duplication cascade (repeats): copies multiply while the repeat
-    // holds and drift apart the longer it lasts. Bigger in HELL MODE.
+    // repeats multiply the copies; the longer it holds,
+    // the further they drift.
     FxDupParams dup = {};
     {
         const float dupTarget = m_phase.repeatActive
@@ -1154,7 +1144,7 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
         }
     }
 
-    // Draw the screen-space pass only if any module is on and visible.
+    // skip the pass when there's nothing to show.
     bool anyFx = rgbOn > 0.0f || params.sliceAmp > 0.003f || params.blockAmp > 0.003f
         || params.waveAmp > 0.003f || params.meltAmp > 0.003f
         || params.rippleAmp * std::exp(-m_rippleT * 2.2f) > 0.003f
@@ -1171,7 +1161,7 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
         m_d3dContext->Unmap(m_screenParamsCb.Get(), 0);
     }
 
-    // HELL extras (b1): mirror decays fast, invert smoothed above.
+    // hell uniforms.
     {
         FxHellParams hell = {};
         hell.invertAmt = std::clamp(m_hellInv, 0.0f, 1.0f);
@@ -1213,7 +1203,7 @@ void OverlayWindow::renderFxChain(const AudioAnalysisSnapshot& snapshot) {
         m_d3dContext->Draw(6, 0);
         m_capturedFrames++;
 
-        // Unbind so the next acquireFrame()->CopyResource is legal.
+        // unbind, or the next copy fails.
         m_d3dContext->PSSetShaderResources(0, 1, nullSrv);
     } else {
         m_lastSkipReason = !anyFx ? "all modules off" : "intensity < 0.02 (quiet)";
@@ -1261,7 +1251,7 @@ bool OverlayWindow::bakeTextAtlas() {
         for (int i = 0; i < m_textRows; ++i) {
             RECT r{ 0, i * rowH, W, (i + 1) * rowH };
             DrawTextW(hdc, kGhostPhrases[i], -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            // Measure real glyph width so quads hug the text (varied sizes).
+            // measure each line so quads fit the text.
             SIZE sz = {};
             if (GetTextExtentPoint32W(hdc, kGhostPhrases[i],
                     static_cast<int>(wcslen(kGhostPhrases[i])), &sz)) {
@@ -1272,7 +1262,7 @@ bool OverlayWindow::bakeTextAtlas() {
         }
     }
 
-    // BGRA -> RGBA upload.
+    // BGRA to RGBA shuffle.
     std::vector<uint8_t> rgba(static_cast<size_t>(W) * H * 4);
     const uint8_t* src = static_cast<const uint8_t*>(bits);
     for (int i = 0; i < W * H; ++i) {
@@ -1332,7 +1322,7 @@ bool OverlayWindow::spawnWord(int phrase, float xPx, float yPx,
 
 void OverlayWindow::spawnTestWord() {
     if (!m_textSrv || m_width <= 0 || m_height <= 0) return;
-    // Cycle phrases in order so every line can be vetted by eye.
+    // go through phrases in order.
     const int phrase = m_testPhraseCursor % kGhostPhraseCount;
     m_testPhraseCursor++;
     std::uniform_real_distribution<float> u01(0.0f, 1.0f);
@@ -1346,7 +1336,7 @@ void OverlayWindow::spawnTestWord() {
         ? (0.06f + u01(m_rng) * 0.26f) * static_cast<float>(m_height)
         : (0.68f + u01(m_rng) * 0.20f) * static_cast<float>(m_height);
     if (!spawnWord(phrase, x, y, scale, 4.0f, 0.35f)) {
-        // All slots busy: steal slot 0 for the vetting helper.
+        // all busy: reuse slot 0.
         m_words[0].alive = false;
         spawnWord(phrase, x, y, scale, 4.0f, 0.35f);
     }
@@ -1354,8 +1344,8 @@ void OverlayWindow::spawnTestWord() {
 
 void OverlayWindow::triggerBlastStaircase() {
     if (!isModuleEnabled(FxModule::TEXT) || !m_textSrv) return;
-    // Staircase blast: 3 steps of one phrase marching down-right like a
-    // ladder, anywhere on screen (center allowed), big and brief.
+    // blast: one phrase as a 3-step staircase, anywhere,
+    // big and gone fast.
     std::uniform_real_distribution<float> u01(0.0f, 1.0f);
     const int phrase = static_cast<int>(m_rng() % kGhostPhraseCount);
     const float scale = 1.4f + u01(m_rng) * 0.4f;
@@ -1381,8 +1371,8 @@ void OverlayWindow::updateWords(const AudioAnalysisSnapshot& snapshot) {
         m_aliveWords = 0;
         return;
     }
-    // Spawn pressure: mids phrases, boosted in BUILD/DROP.
-    // Faster cycle than before: more often, shorter life, more transparent.
+    // words follow the mids, more in builds and drops.
+    // quick in, quick out.
     float spawnBoost = 0.3f;
     if (m_phase.phase == TrackPhase::BUILD) spawnBoost = 1.0f;
     else if (m_phase.phase == TrackPhase::DROP) spawnBoost = 1.5f;
@@ -1404,7 +1394,7 @@ void OverlayWindow::updateWords(const AudioAnalysisSnapshot& snapshot) {
             * (110.0f / 160.0f) * scale;
         const float x = u01(m_rng)
             * std::max(1.0f, static_cast<float>(m_width) - quadW);
-        // Ambient whispers avoid the center box (crosshair zone).
+        // ambient words stay out of the crosshair.
         float y = 0.0f;
         if (u01(m_rng) < 0.5f) {
             y = (0.06f + u01(m_rng) * 0.20f) * static_cast<float>(m_height);
@@ -1434,7 +1424,7 @@ void OverlayWindow::renderGhostWords() {
         return;
     }
 
-    // Pack one full-width strip quad per alive word.
+    // pack one quad per live word.
     ScreenVertex verts[6 * kMaxWords] = {};
     int quad = 0;
     struct DrawCmd { int phrase; float alpha; float seed; float keep; };
@@ -1450,7 +1440,7 @@ void OverlayWindow::renderGhostWords() {
         const float env = std::min(fadeIn, fadeOut);
         if (env <= 0.0f) continue;
 
-        // Quad hugs the measured text width, scaled per instance.
+        // quad fits the text.
         const float glyphH = 160.0f; // atlas row height
         const float quadH = 110.0f * w.scale;
         const float quadW = static_cast<float>(std::max(m_phraseW[w.phrase], 8))
@@ -1524,11 +1514,7 @@ void OverlayWindow::renderGhostWords() {
     m_d3dContext->PSSetShaderResources(0, 1, nullSrv);
 }
 
-// Procedural quad pass REMOVED per user request (border, scanlines, spectrum
-// bars, verification badge all spoiled the rave). Kept as an empty stub so
-// existing header/call sites don't churn; the screen-space RGB pass above is
-// the only visual now. Old color-quad pipeline resources (m_vs/m_ps/...) are
-// still created in initD3D but no longer used for drawing.
+// old quad pass, gutted. Left as a stub so nothing else has to change.
 void OverlayWindow::renderOverlayGraphics(const AudioAnalysisSnapshot& /*snapshot*/) {
     return;
 }

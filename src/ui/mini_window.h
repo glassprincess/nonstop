@@ -20,8 +20,8 @@ class FftAnalyzer;
 class PhaseDetector;
 class HotkeyManager;
 
-// The ONLY user window: tabbed mini remote (FX / Tune / Music / More).
-// Own caption drag (no OS modal move loop -> FX never freezes), minimizable.
+// The only window: tabbed mini remote (FX / Tune / Music / More).
+// Drags itself (OS drag would freeze the picture), minimizable.
 class MiniWindow {
 public:    MiniWindow();
     ~MiniWindow();
@@ -36,20 +36,20 @@ public:    MiniWindow();
     HWND getHwnd() const { return m_hwnd; }
     ImGuiContext* context() const { return m_ctx; }
 
-    // Own-drag helpers used by the window proc.
+    // drag helpers for the window proc.
     void beginOwnDrag();
     void updateOwnDrag();
     void endOwnDrag();
     bool isOwnDragging() const { return m_dragging; }
 
-    // HELL MODE epilepsy warning (fullscreen, every enable).
+    // HELL MODE epilepsy warning (fullscreen, every time).
     void showHellWarning(OverlayWindow* target);
     void closeHellWarning();
     bool isHellWarnOpen() const { return m_hellWarn != nullptr; }
     void confirmHellWarning(); // OK pressed: arm HELL, close
     void cancelHellWarning();  // dismissed: keep HELL off, close
 
-    // Render one frame (call on main thread when visible).
+    // draw one frame (main thread, when visible).
     void render(OverlayWindow& overlay, WasapiCapture& capture,
                 FftAnalyzer& analyzer, PhaseDetector& detector,
                 const HotkeyManager& hotkeyMgr);
@@ -70,12 +70,12 @@ private:
     int m_width = 340;
     int m_height = 640;
 
-    // Own caption drag state (avoids the freezing OS move loop).
+    // drag state (so moving never freezes anything).
     bool m_dragging = false;
     int m_dragOffX = 0;
     int m_dragOffY = 0;
 
-    // HELL warning dialog state.
+    // warning dialog bits.
     HWND m_hellWarn = nullptr;
     HWND m_hellWarnText = nullptr;
     HWND m_hellCheck = nullptr;
@@ -83,7 +83,7 @@ private:
     HFONT m_hellFont = nullptr;
     OverlayWindow* m_hellTarget = nullptr;
 
-    // Cached audio devices (enumeration is COM-heavy, do it once).
+    // audio devices, cached (asking COM every frame is slow).
     std::vector<AudioDeviceInfo> m_cachedDevices;
     int m_selectedDeviceIndex = 0;
     bool m_devicesLoaded = false;

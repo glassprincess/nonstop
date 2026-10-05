@@ -25,13 +25,12 @@ bool HotkeyManager::start() {
         m_threadId = GetCurrentThreadId();
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
-        // Force-create this thread's message queue BEFORE RegisterHotKey.
-        // Without this, RegisterHotKey(NULL,...) variants can silently fail
-        // or never deliver WM_HOTKEY (root cause of "bind doesn't work").
+        // make sure this thread has a message queue first, or the
+        // hotkeys silently never arrive.
         MSG dummy;
         PeekMessageW(&dummy, nullptr, 0, 0, PM_NOREMOVE);
 
-        // Hidden message-only window: most reliable RegisterHotKey target.
+        // invisible window just to catch the hotkeys, works best.
         WNDCLASSEXW wc = {};
         wc.cbSize = sizeof(wc);
         wc.lpfnWndProc = DefWindowProcW;
@@ -122,11 +121,11 @@ void HotkeyManager::onHotkeyFromWorker(int /*hotkeyId*/) {
         ss << "Listening: presses=" << m_pressCount.load(std::memory_order_acquire)
            << " last=" << m_lastPressTickMs.load(std::memory_order_acquire) << "ms";
         std::lock_guard<std::mutex> lock(m_statusMutex);
-        // Keep the OK/CONFLICT prefix if start() wrote it; otherwise generic.
+        // keep the OK/CONFLICT bit, tack the press count on.
         if (m_statusString.find("Listening") == std::string::npos) {
             m_statusString = ss.str();
         } else {
-            // Append press info without losing registration state.
+            // same text as before, plus presses.
             auto pos = m_statusString.find(" presses=");
             std::string base = (pos == std::string::npos)
                 ? m_statusString : m_statusString.substr(0, pos);
@@ -136,7 +135,7 @@ void HotkeyManager::onHotkeyFromWorker(int /*hotkeyId*/) {
         }
     }
 
-    // Legacy callback runs on the WORKER thread: must be thread-safe.
+    // old-school callback, runs on the worker thread: keep it tiny.
     HotkeyCallback cb;
     {
         std::lock_guard<std::mutex> lock(m_callbackMutex);

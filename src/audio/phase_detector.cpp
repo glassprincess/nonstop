@@ -73,9 +73,9 @@ void PhaseDetector::enterPhase(TrackPhase next, const char* reason) {
 }
 
 void PhaseDetector::update(const AudioAnalysisSnapshot& snapshot) {
-    // Audio clock, NOT wall clock: frames drain audio in catch-up bursts,
-    // so wall-stamped onset intervals collapse to ~ms and repeat math dies.
-    // (Silence still advances: loopback always streams while capturing.)
+    // Audio clock, not wall clock: frames gulp audio in bursts,
+    // so wall-stamped gaps shrink to ~ms and the math falls apart.
+    // (Silence still ticks: loopback keeps streaming while capturing.)
     const double t = snapshot.audioTimeSec;
     float dt = (m_lastUpdateT > 0.0) ? static_cast<float>(t - m_lastUpdateT) : (1.0f / 60.0f);
     dt = std::clamp(dt, 1.0f / 240.0f, 0.25f);
@@ -103,9 +103,9 @@ void PhaseDetector::update(const AudioAnalysisSnapshot& snapshot) {
     }
     m_state.onsetDensity = static_cast<float>(m_onsets.size()) / 2.0f;
 
-    // --- Repeat tracker (HELL MODE invert sync) ---
-    // Last 6 onsets -> 5 intervals; regular fast hits = repeat.
-    // NOTE: needs size>=6 (size-6 index); exactly-5 previously underflowed.
+    // --- Repeat tracker ---
+    // Last 6 hits -> 5 gaps; steady fast hits = a repeat.
+    // (needs 6; 5 once read past the start and crashed.)
     {
         if (m_onsets.size() >= 6) {
             const size_t n = m_onsets.size();
@@ -129,8 +129,8 @@ void PhaseDetector::update(const AudioAnalysisSnapshot& snapshot) {
             double var = 0.0;
             for (int i = 0; i < 5; ++i) var += (iv[i] - mean) * (iv[i] - mean);
             const double cv = (mean > 1e-6) ? std::sqrt(var / 5.0) / mean : 1e9;
-            // Humanized rolls live at CV 0.3-0.5; map generously so real
-            // repeats (not just metronomes) arm the detector.
+            // Real rolls wobble around CV 0.3-0.5; score generously
+            // so actual repeats (not just metronomes) trip it.
             float strength = std::clamp((1.0f - static_cast<float>(cv)) * 1.4f, 0.0f, 1.0f);
             if (chatter) strength = 0.0f;
             const float hz = (mean > 1e-6 && !chatter) ? static_cast<float>(1.0 / mean) : 0.0f;
@@ -152,7 +152,7 @@ void PhaseDetector::update(const AudioAnalysisSnapshot& snapshot) {
                 m_state.repeatStrength = 0.0f;
             }
         } else if (m_state.repeatActive) {
-            // Starved of onsets: release quickly (freshness over memory).
+            // No hits for a while: let go fast, don't cling to old news.
             if (m_onsets.empty() || (t - m_onsets.back()) > 0.5) {
                 m_state.repeatActive = false;
                 m_state.repeatHz = 0.0f;
@@ -180,13 +180,13 @@ void PhaseDetector::update(const AudioAnalysisSnapshot& snapshot) {
         break;
     }
     case TrackPhase::BUILD: {
-        // Progress: energy climb since entry, normalized to ~3x drop jump.
+        // How far we've climbed since entering, vs ~3x the drop jump.
         const float climb = bass - m_entryBass;
         const float byEnergy = climb / (m_params.dropJump * 3.0f);
         const float byTime = m_state.timeInPhase / 10.0f;
         m_state.buildProgress = std::clamp(std::max(byEnergy, byTime), 0.0f, 1.0f);
 
-        // Drop = sharp bass jump inside a short window.
+        // Drop = bass jumping up inside a short window.
         const float windowMin = bassAt(m_params.dropWindow);
         const float jump = bass - std::min(windowMin, m_entryBass);
         if (dwelled && m_state.timeInPhase >= m_params.buildMinTime
@@ -216,7 +216,7 @@ void PhaseDetector::update(const AudioAnalysisSnapshot& snapshot) {
             enterPhase(TrackPhase::CALM, "settled");
         } else if (dwelled && m_state.bassSlope > m_params.buildSlopeThresh
                    && m_state.onsetDensity > m_params.onsetDensityThresh) {
-            // New buildup straight out of release (double-drop tracks).
+            // New buildup straight out of cooldown (double-drop tracks).
             m_entryBass = bass;
             enterPhase(TrackPhase::BUILD, "rebuild");
         }

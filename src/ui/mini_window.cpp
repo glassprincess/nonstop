@@ -30,13 +30,12 @@ static std::string wideToUtf8Mini(const std::wstring& wstr) {
     return s;
 }
 
-// Own caption drag: the OS modal move loop would freeze FX rendering
-// (DispatchMessage never returns while dragging), so we move the window
-// ourselves with SetCapture + SetWindowPos. Close/minimize buttons untouched.
+// dragging the caption the normal way freezes rendering (the OS move
+// loop never returns), so the window moves itself instead.
 static LRESULT CALLBACK MiniWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (g_miniSelf && g_miniSelf->context()) {
         if (msg == WM_CLOSE) {
-            // X kills the process (no tray hiding per user request).
+            // X quits the whole thing, no hiding.
             PostQuitMessage(0);
             return 0;
         }
@@ -110,7 +109,7 @@ bool MiniWindow::create(ID3D11Device* device, ID3D11DeviceContext* context) {
         return false;
     }
 
-    // Own ImGui context on the shared device.
+    // its own ImGui context, same device.
     ImGuiContext* prev = ImGui::GetCurrentContext();
     m_ctx = ImGui::CreateContext();
     ImGui::SetCurrentContext(m_ctx);
@@ -208,7 +207,7 @@ void MiniWindow::endOwnDrag() {
     ReleaseCapture();
 }
 
-// ---- HELL MODE epilepsy warning (fullscreen, shown on every enable) ----
+// ---- HELL MODE epilepsy warning (fullscreen, every time) ----
 static const wchar_t* kHellWarnText =
     L"EPILEPSY WARNING / ПРЕДУПРЕЖДЕНИЕ ОБ ЭПИЛЕПСИИ\r\n"
     L"\r\n"
@@ -232,7 +231,7 @@ static LRESULT CALLBACK HellWarnProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         GetClientRect(hwnd, &rc);
         HBRUSH black = (HBRUSH)GetStockObject(BLACK_BRUSH);
         FillRect(hdc, &rc, black);
-        // Red frame.
+        // red frame.
         HPEN red = CreatePen(PS_SOLID, 6, RGB(255, 0, 0));
         HGDIOBJ oldPen = SelectObject(hdc, red);
         HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
@@ -258,7 +257,7 @@ static LRESULT CALLBACK HellWarnProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         const int code = HIWORD(wParam);
         if (!self) break;
         if (id == 101 && code == BN_CLICKED) {
-            // Checkbox toggled: arm OK only when checked.
+            // OK stays dead until the box is checked.
             const BOOL checked = (IsDlgButtonChecked(hwnd, 101) == BST_CHECKED);
             EnableWindow(GetDlgItem(hwnd, 102), checked);
         } else if (id == 102 && code == BN_CLICKED) {
@@ -301,7 +300,7 @@ void MiniWindow::showHellWarning(OverlayWindow* target) {
     if (!m_hellWarn) return;
     SetWindowLongPtrW(m_hellWarn, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
-    // Centered content block.
+    // content block in the middle.
     const int bw = 780;
     const int bx = (sw - bw) / 2;
     int by = sh / 2 - 260;
@@ -322,7 +321,7 @@ void MiniWindow::showHellWarning(OverlayWindow* target) {
         bx + (bw - 240) / 2, by + 395, 240, 52,
         m_hellWarn, reinterpret_cast<HMENU>(102), hi, nullptr);
 
-    // Big red title font.
+    // big title font.
     m_hellFont = CreateFontW(-44, 0, 0, 0, FW_BLACK, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Consolas");
@@ -340,7 +339,7 @@ void MiniWindow::confirmHellWarning() {
 }
 
 void MiniWindow::cancelHellWarning() {
-    // Dismissed = NOT confirmed: make sure HELL stays off.
+    // closed it = didn't agree. HELL stays off.
     if (m_hellTarget) m_hellTarget->setHellMode(false);
     closeHellWarning();
 }
@@ -361,7 +360,7 @@ void MiniWindow::closeHellWarning() {
 }
 
 void MiniWindow::renderFxTab(OverlayWindow& overlay) {
-    // ---- HELL MODE (separate option, epilepsy warning attached) ----
+    // ---- HELL MODE (its own thing, warning attached) ----
     {
         bool hell = overlay.isHellMode() || isHellWarnOpen();
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.25f, 0.25f, 1.0f));
@@ -498,7 +497,7 @@ void MiniWindow::renderMusicTab(OverlayWindow& overlay, WasapiCapture& capture,
     ImGui::TextDisabled("(%.1fs)", st.timeInPhase);
     ImGui::ProgressBar(std::clamp(overlay.getPhaseMaster(), 0.0f, 1.0f), ImVec2(-1, 12), "rave energy");
 
-    // Levels.
+    // levels.
     char txt[48];
     float rmsDb = (snap.rms > 0.0001f) ? (20.0f * std::log10(snap.rms)) : -60.0f;
     std::snprintf(txt, sizeof(txt), "in %.1f dB", rmsDb);

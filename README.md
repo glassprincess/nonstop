@@ -55,7 +55,6 @@ automatically (Dear ImGui, PFFFT, nlohmann/json).
   desktop-duplication screen capture
 - `src/core` — panic hotkeys
 - `src/ui` — mini remote (the only settings UI)
-- `nonstop.md` — original product spec (Russian, ТЗ)
 
 ## Status
 
@@ -121,7 +120,6 @@ cmake --build build --config Release
   захват экрана (desktop duplication)
 - `src/core` — паник-хоткеи
 - `src/ui` — мини-пульт (единственное меню настроек)
-- `nonstop.md` — исходное ТЗ продукта
 
 ## Статус
 

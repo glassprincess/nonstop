@@ -103,3 +103,16 @@ target_link_libraries(nonstop_diagnostics PRIVATE
 set_target_properties(nonstop_diagnostics PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(phase_detector_tests tests/phase_detector_tests.cpp src/audio/phase_detector.cpp)
+    target_include_directories(phase_detector_tests PRIVATE src)
+    add_test(NAME phase_repeat_expiry COMMAND phase_detector_tests)
+    add_test(NAME phase_duplicate_snapshot COMMAND phase_detector_tests duplicate)
+
+    add_executable(fft_analyzer_tests tests/fft_analyzer_tests.cpp src/audio/fft_analyzer.cpp)
+    target_include_directories(fft_analyzer_tests PRIVATE src ${pffft_SOURCE_DIR}/include/pffft ${pffft_SOURCE_DIR}/include)
+    target_link_libraries(fft_analyzer_tests PRIVATE PFFFT)
+    add_test(NAME fft_chunk_boundaries COMMAND fft_analyzer_tests)
+endif()

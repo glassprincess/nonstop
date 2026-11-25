@@ -17,6 +17,7 @@ void PhaseDetector::reset() {
     m_dropPeak = 0.0f;
     m_log.clear();
     m_clockInit = false;
+    m_lastUpdateT = -1.0;
 }
 
 double PhaseDetector::nowSeconds() {
@@ -77,7 +78,8 @@ void PhaseDetector::update(const AudioAnalysisSnapshot& snapshot) {
     // so wall-stamped gaps shrink to ~ms and the math falls apart.
     // (Silence still ticks: loopback keeps streaming while capturing.)
     const double t = snapshot.audioTimeSec;
-    float dt = (m_lastUpdateT > 0.0) ? static_cast<float>(t - m_lastUpdateT) : (1.0f / 60.0f);
+    if (t == m_lastUpdateT) return;
+    float dt = (m_lastUpdateT >= 0.0) ? static_cast<float>(t - m_lastUpdateT) : (1.0f / 60.0f);
     dt = std::clamp(dt, 1.0f / 240.0f, 0.25f);
     m_lastUpdateT = t;
     m_state.timeInPhase += dt;
@@ -107,7 +109,13 @@ void PhaseDetector::update(const AudioAnalysisSnapshot& snapshot) {
     // Last 6 hits -> 5 gaps; steady fast hits = a repeat.
     // (needs 6; 5 once read past the start and crashed.)
     {
-        if (m_onsets.size() >= 6) {
+        if (m_onsets.empty() || (t - m_onsets.back()) > 0.5) {
+            m_state.repeatActive = false;
+            m_state.repeatHz = 0.0f;
+            m_state.repeatStrength = 0.0f;
+            m_state.repeatCandHz = 0.0f;
+            m_state.repeatCandStr = 0.0f;
+        } else if (m_onsets.size() >= 6) {
             const size_t n = m_onsets.size();
             double iv[5] = {};
             for (size_t i = 0; i < 5; ++i) {
@@ -148,13 +156,6 @@ void PhaseDetector::update(const AudioAnalysisSnapshot& snapshot) {
                 m_state.repeatHz = hz;
                 m_state.repeatStrength = strength;
             } else {
-                m_state.repeatHz = 0.0f;
-                m_state.repeatStrength = 0.0f;
-            }
-        } else if (m_state.repeatActive) {
-            // No hits for a while: let go fast, don't cling to old news.
-            if (m_onsets.empty() || (t - m_onsets.back()) > 0.5) {
-                m_state.repeatActive = false;
                 m_state.repeatHz = 0.0f;
                 m_state.repeatStrength = 0.0f;
             }

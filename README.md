@@ -127,3 +127,23 @@ cmake --build build --config Release
 (настройки живут в сессии), нет телеметрии, никакой сетевой
 активности вообще.
 Лицензия: TBD (all rights reserved for now).
+
+## Unreleased maintenance update
+
+- Reduced FFT input-buffer copying to once per analysis hop instead of once per sample.
+- Fixed repeat detection staying active after a burst ends.
+- Fixed duplicate audio snapshots counting the same beat more than once.
+- Added CTest regression checks for repeat timing and FFT chunk boundaries.
+
+Run the checks after building:
+
+```bat
+ctest --test-dir build -C Release --output-on-failure
+```
+
+## Изменения в разработке
+
+- Буфер FFT теперь сдвигается раз за шаг анализа вместо каждого сэмпла.
+- Детектор репитов отпускает закончившуюся серию ударов.
+- Повторное чтение одного аудиоснимка больше не добавляет лишние удары в детектор.
+- Добавлены регрессионные проверки через CTest; команда запуска приведена выше.

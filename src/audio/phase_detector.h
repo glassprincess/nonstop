@@ -108,7 +108,7 @@ private:
 
     std::chrono::steady_clock::time_point m_clockBase;
     bool m_clockInit = false;
-    double m_lastUpdateT = 0.0;
+    double m_lastUpdateT = -1.0;
 
     std::vector<std::string> m_log;
 };

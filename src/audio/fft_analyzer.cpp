@@ -65,11 +65,16 @@ void FftAnalyzer::setSampleRate(uint32_t sampleRate) {
 void FftAnalyzer::processSamples(const float* samples, size_t count) {
     if (!samples || count == 0) return;
 
-    for (size_t i = 0; i < count; ++i) {
-        // push one sample through, FFT every hop
-        m_inputBuffer.erase(m_inputBuffer.begin());
-        m_inputBuffer.push_back(samples[i]);
-        m_samplesSinceLastFft++;
+    size_t offset = 0;
+    while (offset < count) {
+        if (m_samplesSinceLastFft == 0) {
+            std::move(m_inputBuffer.begin() + HOP_SIZE, m_inputBuffer.end(), m_inputBuffer.begin());
+        }
+        const size_t chunk = std::min(count - offset, HOP_SIZE - m_samplesSinceLastFft);
+        std::copy_n(samples + offset, chunk,
+                    m_inputBuffer.begin() + FFT_SIZE - HOP_SIZE + m_samplesSinceLastFft);
+        offset += chunk;
+        m_samplesSinceLastFft += chunk;
 
         if (m_samplesSinceLastFft >= HOP_SIZE) {
             performFft();

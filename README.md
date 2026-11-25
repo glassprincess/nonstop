@@ -5,7 +5,7 @@ screen to the music in real time: RGB-split, slices, waves, melt, ripples,
 glass rain, zoom punch, ghost words, duplication cascade. Click-through:
 mouse and keyboard reach the game underneath.
 
-Current version: v0.1.0-megatest. Dirty prototype, everything may change.
+Current version: v0.1.1-megatest. Dirty prototype, everything may change.
 
 ## Requirements
 
@@ -71,7 +71,7 @@ License: TBD (all rights reserved for now).
 плавление, кольца, дождь по стеклу, зум-панч, слова-призраки, каскад
 дублирования. Click-through: мышь и клавиатура проходят в игру.
 
-Текущая версия: v0.1.0-megatest. Грязный прототип, всё может поменяться.
+Текущая версия: v0.1.1-megatest. Грязный прототип, всё может поменяться.
 
 ## Требования
 
@@ -128,7 +128,7 @@ cmake --build build --config Release
 активности вообще.
 Лицензия: TBD (all rights reserved for now).
 
-## Unreleased maintenance update
+## v0.1.1-megatest maintenance update
 
 - Reduced FFT input-buffer copying to once per analysis hop instead of once per sample.
 - Fixed repeat detection staying active after a burst ends.
@@ -141,7 +141,7 @@ Run the checks after building:
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-## Изменения в разработке
+## Изменения v0.1.1-megatest
 
 - Буфер FFT теперь сдвигается раз за шаг анализа вместо каждого сэмпла.
 - Детектор репитов отпускает закончившуюся серию ударов.
